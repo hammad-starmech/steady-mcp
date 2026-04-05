@@ -212,6 +212,10 @@ function textToRichTextHtml(text) {
 
 function stripHtmlTags(html) {
   return String(html ?? "")
+    .replace(/<a\s[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, (_, href, text) => {
+      const url = href.startsWith("/") ? `https://app.steady.space${href}` : href;
+      return text === url ? url : `[${text}](${url})`;
+    })
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
     .replace(/<\/li>/gi, "\n")
