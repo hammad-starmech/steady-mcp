@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -165,6 +166,29 @@ function getLocalISODate(date = new Date()) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function getWeekRange(which = "current") {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + mondayOffset);
+  if (which === "last") monday.setDate(monday.getDate() - 7);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  return { from: getLocalISODate(monday), to: getLocalISODate(friday) };
+}
+
+function getDatesBetween(from, to) {
+  const dates = [];
+  const current = new Date(from + "T00:00:00");
+  const end = new Date(to + "T00:00:00");
+  while (current <= end) {
+    dates.push(getLocalISODate(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -185,6 +209,104 @@ function textToRichTextHtml(text) {
     .filter(Boolean)
     .map((p) => `<p>${escapeHtml(p).replace(/\r\n|\r|\n/g, "<br>")}</p>`);
   return paragraphs.join("");
+}
+
+function stripHtmlTags(html) {
+  return String(html ?? "")
+    .replace(/<a\s[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, (_, href, text) => {
+      const url = href.startsWith("/") ? `https://app.steady.space${href}` : href;
+      return text === url ? url : `[${text}](${url})`;
+    })
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<hr\s*\/?>/gi, "\n---\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function parseCheckinEntriesFromHtml(html) {
+  if (!html || html.includes("empty-state")) {
+    const emptyMatch = html?.match(/No check-ins for (\w+ \d+)/);
+    return { empty: true, message: emptyMatch ? emptyMatch[0] : "No check-ins", entries: [] };
+  }
+
+  const entries = [];
+  const cardRe = /<div class="content-card__body">([\s\S]*?)(?=<div class="content-card__body">|<aside[\s >]|<\/article>)/g;
+  let cardMatch;
+  while ((cardMatch = cardRe.exec(html)) !== null) {
+    const block = cardMatch[1];
+    const authorMatch = block.match(/<a class="author-name truncate"[^>]*>([^<]+)<\/a>/);
+    if (!authorMatch) continue;
+    const userName = authorMatch[1].trim();
+
+    const sections = {};
+    const sectionRe = /<h4 class="status-content__response-header[^"]*">\s*(Next|Previously|Blockers)[\s\S]*?<\/h4>\s*<div class="markdown-body"[^>]*>([\s\S]*?)<\/div>/g;
+    let secMatch;
+    while ((secMatch = sectionRe.exec(block)) !== null) {
+      const label = secMatch[1].trim().toLowerCase();
+      const key = label === "previously" ? "previous" : label;
+      sections[key] = stripHtmlTags(secMatch[2]);
+    }
+
+    entries.push({
+      userName,
+      next: sections.next ?? "",
+      previous: sections.previous ?? "",
+      blockers: sections.blockers ?? "",
+    });
+  }
+  return { empty: false, entries };
+}
+
+function parseGoalsFromDigestHtml(html) {
+  const goals = [];
+  const re = /<li class="goal-list__item"\s+data-id="([^"]+)"[\s\S]*?<p class="goal-list__title[^"]*">([^<]+)<\/p>/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const id = m[1];
+    const name = m[2].trim();
+    goals.push({ id, name, url: `${STEADY_BASE_URL}/goals/${id}` });
+  }
+  return goals;
+}
+
+function parseGoalUpdatesFromHtml(html) {
+  const updates = [];
+  const blocks = html.split(/<li class="goal-update">/);
+  blocks.shift();
+  for (const block of blocks) {
+    const authorMatch = block.match(/<a class="author-name truncate"[^>]*>([^<]+)<\/a>/);
+    if (!authorMatch) continue;
+    const userName = authorMatch[1].trim();
+
+    const dateMatch = block.match(/<local-time[^>]*datetime="([^"]+)"[^>]*>/);
+    const isoDate = dateMatch ? dateMatch[1].split("T")[0] : "";
+
+    const headingMatch = block.match(/<h3 class="content-card__heading[^"]*">[\s\S]*?<a\s+href="([^"]*)">([\s\S]*?)<\/a>/);
+    const titleUrl = headingMatch?.[1] ?? "";
+    const titleRaw = headingMatch?.[2] ?? "";
+    const title = titleRaw.replace(/<[^>]+>/g, "").trim();
+
+    const bodyMatch = block.match(/<div class="markdown-body"[^>]*>([\s\S]*?)<\/div>/);
+    const body = bodyMatch ? stripHtmlTags(bodyMatch[1]) : "";
+
+    updates.push({
+      userName,
+      date: isoDate,
+      title,
+      title_url: titleUrl.startsWith("/") ? `${STEADY_BASE_URL}${titleUrl}` : titleUrl,
+      body,
+    });
+  }
+  return updates;
 }
 
 async function curl({ url, cookies, method = "GET", headers = {}, dataUrlencode = [], wantHeaders = false }) {
@@ -525,6 +647,21 @@ function resolveTeamId({ team, teams }) {
   return null;
 }
 
+function resolveGoalId({ goal, goals }) {
+  if (typeof goal === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(goal)) {
+    return goal;
+  }
+  const normalized = String(goal).trim().toLowerCase();
+  const strip = (s) => s.replace(/[[\]()]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const exact = goals.find((g) => g.name.trim().toLowerCase() === normalized);
+  if (exact) return exact.id;
+  const partial = goals.find((g) => g.name.trim().toLowerCase().includes(normalized));
+  if (partial) return partial.id;
+  const fuzzy = goals.find((g) => strip(g.name).includes(strip(goal)));
+  if (fuzzy) return fuzzy.id;
+  return null;
+}
+
 async function steadyPing({ cookies }) {
   const url = `${STEADY_BASE_URL}/check-ins`;
   const html = await curl({ url, cookies, method: "GET" });
@@ -538,6 +675,96 @@ async function steadyListTeams({ jarPath, date }) {
   const html = await curlWithJar({ url, jarPath, method: "GET" });
   const teams = parseTeamsFromHtml(html);
   return { date: isoDate, teams };
+}
+
+async function steadyGetCheckins({ jarPath, team, user, week, dateFrom, dateTo }) {
+  const range = (week)
+    ? getWeekRange(week)
+    : { from: dateFrom ?? getWeekRange("current").from, to: dateTo ?? getWeekRange("current").to };
+  const dates = getDatesBetween(range.from, range.to);
+
+  const editHtml = await curlWithJar({
+    url: `${STEADY_BASE_URL}/check-ins/${getLocalISODate()}/edit`,
+    jarPath,
+    method: "GET",
+  });
+  const teams = parseTeamsFromHtml(editHtml);
+  const teamId = resolveTeamId({ team, teams });
+  if (!teamId) {
+    throw new Error(`Unknown team '${team}'. Available: ${teams.map((t) => t.name).join(", ")}`);
+  }
+  const teamName = teams.find((t) => t.id === teamId)?.name ?? team;
+
+  const checkins = [];
+  const daysWithoutCheckin = [];
+
+  for (const date of dates) {
+    const url = `${STEADY_BASE_URL}/teams/${teamId}/check-ins/on/${date}?state=completed`;
+    const html = await curlWithJar({ url, jarPath, method: "GET" });
+    const { empty, entries } = parseCheckinEntriesFromHtml(html);
+
+    if (empty || entries.length === 0) {
+      daysWithoutCheckin.push(date);
+      continue;
+    }
+
+    let matched = entries;
+    if (user) {
+      const needle = user.toLowerCase();
+      matched = entries.filter((e) => e.userName.toLowerCase().includes(needle));
+    }
+
+    if (matched.length === 0) {
+      daysWithoutCheckin.push(date);
+    } else {
+      for (const entry of matched) {
+        checkins.push({ date, userName: entry.userName, next: entry.next, previous: entry.previous, blockers: entry.blockers });
+      }
+    }
+  }
+
+  return {
+    team: teamName,
+    team_id: teamId,
+    user: user ?? "(all)",
+    date_range: range,
+    checkins,
+    days_without_checkin: daysWithoutCheckin,
+  };
+}
+
+async function steadyListGoals({ jarPath }) {
+  const html = await curlWithJar({ url: `${STEADY_BASE_URL}/digest`, jarPath, method: "GET" });
+  const goals = parseGoalsFromDigestHtml(html);
+  return { goals };
+}
+
+async function steadyGetGoalUpdates({ jarPath, goal, user, limit = 10 }) {
+  const { goals } = await steadyListGoals({ jarPath });
+  const goalId = resolveGoalId({ goal, goals });
+  if (!goalId) {
+    throw new Error(`Unknown goal '${goal}'. Available: ${goals.map((g) => g.name).join(", ")}`);
+  }
+  const goalName = goals.find((g) => g.id === goalId)?.name ?? goal;
+  const goalUrl = `${STEADY_BASE_URL}/goals/${goalId}`;
+
+  const html = await curlWithJar({ url: goalUrl, jarPath, method: "GET" });
+  let updates = parseGoalUpdatesFromHtml(html);
+
+  if (user) {
+    const needle = user.toLowerCase();
+    updates = updates.filter((u) => u.userName.toLowerCase().includes(needle));
+  }
+
+  updates = updates.slice(0, limit);
+
+  return {
+    goal: goalName,
+    goal_id: goalId,
+    goal_url: goalUrl,
+    user: user ?? "(all)",
+    updates,
+  };
 }
 
 async function steadySubmitCheckin({
@@ -679,6 +906,46 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["team", "text"],
         },
       },
+      {
+        name: "steady_get_checkins",
+        description:
+          "Fetch historical check-in data for a user on a team across a date range. Scrapes the completed check-ins pages and extracts Next/Previously/Blockers sections.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            team: { type: "string", description: "Team name or team UUID." },
+            user: { type: "string", description: "User display name to filter by (case-insensitive partial match). Omit to return all users." },
+            week: { type: "string", description: "'current' or 'last' — returns Mon-Fri of the relevant week. Mutually exclusive with date_from/date_to." },
+            date_from: { type: "string", description: "Start date YYYY-MM-DD (inclusive). Defaults to current week Monday." },
+            date_to: { type: "string", description: "End date YYYY-MM-DD (inclusive). Defaults to current week Friday." },
+          },
+          required: ["team"],
+        },
+      },
+      {
+        name: "steady_list_goals",
+        description:
+          "List the logged-in user's associated goals (name, id, url) from the Steady digest sidebar.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "steady_get_goal_updates",
+        description:
+          "Fetch goal updates from a Steady goal page. Returns update title (with link), body (with embedded links preserved as markdown), author, and date. Optionally filter by user name.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            goal: { type: "string", description: "Goal name (partial match) or goal UUID." },
+            user: { type: "string", description: "Filter updates by user display name (case-insensitive partial match). Omit to return all users." },
+            limit: { type: "number", description: "Max updates to return (default 10)." },
+          },
+          required: ["goal"],
+        },
+      },
     ],
   };
 });
@@ -754,6 +1021,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       mood,
       date,
     });
+    return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+  }
+
+  if (name === "steady_get_checkins") {
+    const team = String(args.team);
+    const user = args.user ? String(args.user) : undefined;
+    const week = args.week ? String(args.week) : undefined;
+    const dateFrom = args.date_from ? String(args.date_from) : undefined;
+    const dateTo = args.date_to ? String(args.date_to) : undefined;
+
+    const res = await steadyGetCheckins({ jarPath, team, user, week, dateFrom, dateTo });
+    return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+  }
+
+  if (name === "steady_list_goals") {
+    const res = await steadyListGoals({ jarPath });
+    return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+  }
+
+  if (name === "steady_get_goal_updates") {
+    const goal = String(args.goal);
+    const user = args.user ? String(args.user) : undefined;
+    const limit = args.limit ? Number(args.limit) : 10;
+    const res = await steadyGetGoalUpdates({ jarPath, goal, user, limit });
     return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
   }
 
