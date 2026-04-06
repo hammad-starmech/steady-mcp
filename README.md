@@ -1,10 +1,38 @@
-# Steady MCP (local)
+# Steady MCP
 
-This is a **local MCP server** that submits Steady check-ins by driving Steady’s **web form** (there is **no official Steady API**).
+This is an MCP server that submits Steady check-ins by driving Steady's **web form** (there is **no official Steady API**).
 
-It’s built for the workflow:
+It's built for the workflow:
 
 > You tell the AI: **team + check-in fields** (previous / next / blockers) → AI calls the MCP tool → Steady check-in is submitted.
+
+---
+
+## Quick Start (no clone needed)
+
+The fastest way to use this server. Requires only **Node.js 18+** installed.
+
+Add the following to your MCP client config (e.g. `mcp.json` in Cursor):
+
+```json
+{
+  "mcpServers": {
+    "steady-mcp": {
+      "command": "npx",
+      "args": ["-y", "github:hammad-starmech/steady-mcp"],
+      "env": {
+        "STEADY_BASE_URL": "https://app.steady.space",
+        "STEADY_EMAIL": "you@company.com",
+        "STEADY_PASSWORD": "<YOUR_PASSWORD>"
+      }
+    }
+  }
+}
+```
+
+Replace `you@company.com` and `<YOUR_PASSWORD>` with your Steady credentials, then restart your MCP client.
+
+That's it — `npx` will automatically download and run the server. No cloning, no `npm install`.
 
 ---
 
@@ -30,10 +58,13 @@ So **this server uses a curl cookie jar** (`cookiejar.txt`) to preserve the upda
 
 ---
 
-## Install
+## Install (local clone — alternative)
+
+Only needed if you prefer running from a local clone instead of `npx`.
 
 ```bash
-cd tools/steady-mcp
+git clone https://github.com/hammad-starmech/steady-mcp.git
+cd steady-mcp
 npm install
 ```
 
@@ -47,11 +78,11 @@ Add a server entry to your Cursor MCP config.
 
 Common locations:
 - **macOS / Linux**: `~/.cursor/mcp.json`
-- **Windows**: `%USERPROFILE%\\.cursor\\mcp.json`
+- **Windows**: `%USERPROFILE%\.cursor\mcp.json`
 
-If you don’t see it, use Cursor’s UI settings for MCP servers (recommended), or search for `mcp.json` on your machine.
+If you don't see it, use Cursor's UI settings for MCP servers (recommended), or search for `mcp.json` on your machine.
 
-### Quickstart: macOS (recommended)
+### Quickstart: macOS
 
 1) **Install Node.js 18+**
 
@@ -62,18 +93,11 @@ brew install node
 node -v
 ```
 
-2) **Install dependencies**
+2) **Add `steady-mcp` to `~/.cursor/mcp.json`** using the [Quick Start](#quick-start-no-clone-needed) config above
 
-```bash
-cd <ABS_PATH_TO_REPO>/tools/steady-mcp
-npm install
-```
+3) **Restart Cursor** (quit + reopen)
 
-3) **Add `steady-mcp` to `~/.cursor/mcp.json`** (example below)
-
-4) **Restart Cursor** (quit + reopen)
-
-5) In Cursor, run:
+4) In Cursor, run:
 - `steady_login`
 - `steady_submit_checkin`
 
@@ -88,24 +112,37 @@ winget install OpenJS.NodeJS.LTS
 node -v
 ```
 
-2) **Install dependencies**
+2) **Add `steady-mcp` to `%USERPROFILE%\.cursor\mcp.json`** using the [Quick Start](#quick-start-no-clone-needed) config above
 
-```powershell
-cd <ABS_PATH_TO_REPO>\tools\steady-mcp
-npm install
-```
+3) **Restart Cursor** (fully quit + reopen)
 
-3) **Add `steady-mcp` to `%USERPROFILE%\.cursor\mcp.json`**
-
-4) **Restart Cursor** (fully quit + reopen)
-
-5) In Cursor, run:
+4) In Cursor, run:
 - `steady_login`
 - `steady_submit_checkin`
 
-### Example `mcp.json` snippet
+### Example `mcp.json` snippets
 
-> Replace `<ABS_PATH_TO_REPO>` and your email.
+#### Recommended: npx (no clone)
+
+```json
+{
+  "mcpServers": {
+    "steady-mcp": {
+      "command": "npx",
+      "args": ["-y", "github:hammad-starmech/steady-mcp"],
+      "env": {
+        "STEADY_BASE_URL": "https://app.steady.space",
+        "STEADY_EMAIL": "you@company.com",
+        "STEADY_PASSWORD": "<YOUR_PASSWORD>"
+      }
+    }
+  }
+}
+```
+
+#### Alternative: local clone
+
+> Replace `<ABS_PATH_TO_REPO>` with the absolute path to your cloned repo.
 
 ```json
 {
@@ -113,7 +150,7 @@ npm install
     "steady-mcp": {
       "command": "node",
       "args": [
-        "<ABS_PATH_TO_REPO>/tools/steady-mcp/src/index.js"
+        "<ABS_PATH_TO_REPO>/steady-mcp/src/index.js"
       ],
       "env": {
         "STEADY_BASE_URL": "https://app.steady.space",
@@ -128,7 +165,7 @@ npm install
 
 ### Windows path tip (important)
 
-In JSON, Windows backslashes require escaping. Easiest option: use forward slashes in the `args` path:
+If using the local clone approach, Windows backslashes require escaping in JSON. Easiest option: use forward slashes in the `args` path:
 
 ```json
 {
@@ -136,7 +173,7 @@ In JSON, Windows backslashes require escaping. Easiest option: use forward slash
     "steady-mcp": {
       "command": "node",
       "args": [
-        "C:/Users/<YOU>/path/to/repo/tools/steady-mcp/src/index.js"
+        "C:/Users/<YOU>/path/to/steady-mcp/src/index.js"
       ],
       "env": {
         "STEADY_BASE_URL": "https://app.steady.space",
@@ -150,7 +187,7 @@ In JSON, Windows backslashes require escaping. Easiest option: use forward slash
 
 ### Security note
 
-- `STEADY_PASSWORD` in `mcp.json` is the simplest setup, but it’s **not** ideal for security.
+- `STEADY_PASSWORD` in `mcp.json` is the simplest setup, but it's **not** ideal for security.
 - Prefer `STEADY_PASSWORD_COMMAND` (password retrieved at runtime) whenever possible.
 
 ---
@@ -182,7 +219,7 @@ security add-generic-password -a "you@company.com" -s "steady-mcp" -w "<YOUR_PAS
      - `STEADY_PASSWORD_COMMAND=security find-generic-password -w -s steady-mcp -a you@company.com`
 
 - **Windows**: use a password manager CLI (e.g. 1Password CLI / Bitwarden CLI) or a small local script that prints the password.
-- **Any OS**: use your password manager’s CLI, or a small script you keep outside git.
+- **Any OS**: use your password manager's CLI, or a small script you keep outside git.
 
 ### Option C (macOS-only fallback): Keychain lookup without a command
 
@@ -207,7 +244,7 @@ This will log in and write:
 
 ### 2) Cookie-based auth (fallback)
 
-If login automation doesn’t work for your Steady account, you can set cookies from your browser:
+If login automation doesn't work for your Steady account, you can set cookies from your browser:
 
 1) In Steady (browser): DevTools → Application/Storage → Cookies → `https://app.steady.space`
 2) Copy these cookies:
@@ -232,8 +269,8 @@ Defaults (can be overridden via env):
   - cookies: `~/Library/Application Support/steady-mcp/cookies.txt`
   - jar: `~/Library/Application Support/steady-mcp/cookiejar.txt`
 - **Windows**
-  - cookies: `%APPDATA%\\steady-mcp\\cookies.txt`
-  - jar: `%APPDATA%\\steady-mcp\\cookiejar.txt`
+  - cookies: `%APPDATA%\steady-mcp\cookies.txt`
+  - jar: `%APPDATA%\steady-mcp\cookiejar.txt`
 - **Linux**
   - cookies: `$XDG_CONFIG_HOME/steady-mcp/cookies.txt` (or `~/.config/steady-mcp/cookies.txt`)
   - jar: `$XDG_CONFIG_HOME/steady-mcp/cookiejar.txt` (or `~/.config/steady-mcp/cookiejar.txt`)
@@ -263,7 +300,7 @@ Then verify:
 Call:
 - `steady_list_teams`
 
-### Step 3: Submit today’s check-in for one team
+### Step 3: Submit today's check-in for one team
 
 Call:
 - `steady_submit_checkin`
@@ -303,13 +340,13 @@ Common issues:
 
 - **Tool not found in Cursor**
   - fully restart Cursor
-  - verify the `mcp.json` entry path is correct and absolute
-  - verify `npm install` was run in `tools/steady-mcp`
+  - verify the `mcp.json` entry is correct
+  - if using local clone, verify `npm install` was run
 
 - **HTTP 422**
   - usually means the submission was rejected (already checked in / stale session / insufficient permission)
   - run `steady_login` again and retry
-  - confirm the team is actually pending on Steady’s daily page
+  - confirm the team is actually pending on Steady's daily page
 
 - **Need debug**
   - set `STEADY_MCP_DEBUG=1` (warning: debug output may include sensitive cookies)
