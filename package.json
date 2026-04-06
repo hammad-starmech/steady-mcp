@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "steady-mcp": "src/index.js"
+  },
   "description": "Local MCP server to submit Steady check-ins via the web UI (no official API).",
   "license": "UNLICENSED",
   "engines": {
